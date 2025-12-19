@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	// Import portfolio components
 	portfolioRepo "gintugas/modules/components/all/repo"
 	portfolioService "gintugas/modules/components/all/service"
 
@@ -38,10 +37,14 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	// ⭐ CEK DATABASE STATUS
+	dbAvailable := db != nil && gormDB != nil
+	fmt.Printf("\n🔍 Database Status: available=%v\n", dbAvailable)
+
 	uploadBasePath := getUploadPath()
 
 	// ============================
-	// CREATE UPLOAD SERVICES
+	// STORAGE CONFIGURATION
 	// ============================
 	fmt.Println("=== STORAGE CONFIGURATION ===")
 
@@ -50,9 +53,6 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 	bucket := os.Getenv("SUPABASE_STORAGE_BUCKET")
 	uploadProvider := os.Getenv("UPLOAD_PROVIDER")
 
-	fmt.Printf("SUPABASE_URL: %s\n", supabaseURL)
-
-	// ⭐ PERBAIKAN: Cek panjang key sebelum menggunakan strings.Repeat
 	if supabaseServiceKey != "" && len(supabaseServiceKey) > 10 {
 		fmt.Printf("SUPABASE_SERVICE_ROLE_KEY: %s\n",
 			strings.Repeat("*", len(supabaseServiceKey)-10)+supabaseServiceKey[len(supabaseServiceKey)-10:])
@@ -62,32 +62,8 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 		fmt.Printf("SUPABASE_SERVICE_ROLE_KEY: (not set)\n")
 	}
 
-	fmt.Printf("SUPABASE_STORAGE_BUCKET: %s\n", bucket)
-	fmt.Printf("UPLOAD_PROVIDER: %s\n", uploadProvider)
-
-	// ⭐ PERBAIKAN: Debug semua env variables
-	fmt.Println("\n=== ENVIRONMENT VARIABLES ===")
-	envVars := []string{
-		"SUPABASE_URL",
-		"SUPABASE_ANON_KEY",
-		"SUPABASE_SERVICE_ROLE_KEY",
-		"SUPABASE_STORAGE_BUCKET",
-		"UPLOAD_PROVIDER",
-		"GIN_MODE",
-	}
-
-	for _, env := range envVars {
-		value := os.Getenv(env)
-		if value == "" {
-			fmt.Printf("⚠️  %s: (not set)\n", env)
-		} else {
-			fmt.Printf("✅ %s: %s\n", env, value[:min(len(value), 50)])
-		}
-	}
-
 	var supabaseUploadService *utils.SupabaseUploadService
 
-	// Setup Supabase Storage
 	if supabaseURL != "" && supabaseServiceKey != "" {
 		fmt.Println("\n🔄 Initializing Supabase Storage...")
 		supabaseUploadService = utils.NewSupabaseUploadService(supabaseURL, supabaseServiceKey, bucket)
@@ -96,105 +72,7 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 	} else {
 		uploadProvider = "local"
 		fmt.Println("\n⚠️  Supabase Storage not configured, using local storage")
-		if supabaseURL == "" {
-			fmt.Println("   Reason: SUPABASE_URL is empty")
-		}
-		if supabaseServiceKey == "" {
-			fmt.Println("   Reason: SUPABASE_SERVICE_ROLE_KEY is empty")
-		}
 	}
-
-	// ============================
-	// PROJECT DEPENDENCIES
-	// ============================
-	projectRepo := projectRPO.NewRepository(db)
-
-	var projectService projectServsc.Service
-	if uploadProvider == "supabase" && supabaseUploadService != nil {
-		// Create Supabase wrapper
-		supabaseWrapper := projectServsc.NewSupabaseUploadWrapper(supabaseUploadService)
-		// Use existing NewService but pass upload wrapper
-		projectService = projectServsc.NewServiceWithUpload(projectRepo, supabaseWrapper, "projects")
-		fmt.Println("📁 Project Service: Using Supabase Storage")
-	} else {
-		// Use local storage
-		localPath := filepath.Join(uploadBasePath, "projects")
-		projectService = projectServsc.NewService(projectRepo, localPath)
-		fmt.Println("📁 Project Service: Using Local Storage")
-	}
-	projectHandler := handlers.NewProjectHandler(projectService)
-
-	memberRepo := repositoryprojek.NewProjectMemberRepo(gormDB)
-	memberService := projectServsc.NewProjectMemberService(memberRepo, projectRepo)
-
-	tagsrepo := projectRPO.NewTagsRepository(gormDB)
-	tagsService := projectServsc.NewTaskService(tagsrepo)
-	tagsHandler := handlers.NewTagsHandler(tagsService)
-
-	// ============================
-	// EXPERIENCE DEPENDENCIES
-	// ============================
-	expeRepo := repo.NewExpeGormRepository(gormDB)
-	expeService := service.NewExpeService(expeRepo)
-	expeHandler := serviceroute.NewGormExpeHandler(expeService)
-
-	// ============================
-	// PORTFOLIO DEPENDENCIES
-	// ============================
-
-	// Skills with upload service
-	skillRepo := portfolioRepo.NewSkillRepository(gormDB)
-	var skillService portfolioService.SkillService
-	if uploadProvider == "supabase" && supabaseUploadService != nil {
-		supabaseWrapper := portfolioService.NewSupabaseUploadWrapper(supabaseUploadService)
-		skillService = portfolioService.NewSkillServiceWithUpload(skillRepo, supabaseWrapper, "skills")
-	} else {
-		localPath := filepath.Join(uploadBasePath, "skills")
-		skillService = portfolioService.NewSkillService(skillRepo, localPath)
-	}
-	skillHandler := handlers.NewSkillHandler(skillService)
-
-	// Certificates with upload service
-	certRepo := portfolioRepo.NewCertificateRepository(gormDB)
-	var certService portfolioService.CertificateService
-	if uploadProvider == "supabase" && supabaseUploadService != nil {
-		supabaseWrapper := portfolioService.NewSupabaseUploadWrapper(supabaseUploadService)
-		certService = portfolioService.NewCertificateServiceWithUpload(certRepo, supabaseWrapper, "certificates")
-	} else {
-		localPath := filepath.Join(uploadBasePath, "certificates")
-		certService = portfolioService.NewCertificateService(certRepo, localPath)
-	}
-	certHandler := handlers.NewCertificateHandler(certService)
-
-	// Education (no upload needed)
-	eduRepo := portfolioRepo.NewEducationRepository(gormDB)
-	eduService := portfolioService.NewEducationService(eduRepo)
-	eduHandler := handlers.NewEducationHandler(eduService)
-
-	// Testimonials (no upload needed)
-	testRepo := portfolioRepo.NewTestimonialRepository(gormDB)
-	testService := portfolioService.NewTestimonialService(testRepo)
-	testHandler := handlers.NewTestimonialHandler(testService)
-
-	// Blog (no upload needed)
-	blogRepo := portfolioRepo.NewBlogRepository(gormDB)
-	blogService := portfolioService.NewBlogService(blogRepo)
-	blogHandler := handlers.NewBlogHandler(blogService)
-
-	// Sections (no upload needed)
-	sectionRepo := portfolioRepo.NewSectionRepository(gormDB)
-	sectionService := portfolioService.NewSectionService(sectionRepo)
-	sectionHandler := handlers.NewSectionHandler(sectionService)
-
-	// Social Links (no upload needed)
-	socialLinkRepo := portfolioRepo.NewSocialLinkRepository(gormDB)
-	socialLinkService := portfolioService.NewSocialLinkService(socialLinkRepo)
-	socialLinkHandler := handlers.NewSocialLinkHandler(socialLinkService)
-
-	// Settings (no upload needed)
-	settingRepo := portfolioRepo.NewSettingRepository(gormDB)
-	settingService := portfolioService.NewSettingService(settingRepo)
-	settingHandler := handlers.NewSettingHandler(settingService)
 
 	// ============================
 	// SWAGGER
@@ -213,12 +91,106 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 				"service":   "gintugas-api",
 				"timestamp": time.Now().Unix(),
 				"upload":    uploadProvider,
+				"database":  dbAvailable,
 			})
 		})
 
+		// ⭐ CEK DATABASE SEBELUM INIT ROUTES
+		if !dbAvailable {
+			// Database tidak tersedia - hanya serve basic routes
+			api.GET("/status", func(c *gin.Context) {
+				c.JSON(503, gin.H{
+					"error":   "Database not configured",
+					"message": "Please set DATABASE_URL environment variable",
+					"upload":  uploadProvider,
+				})
+			})
+
+			fmt.Println("⚠️  Skipping database-dependent routes (database not available)")
+			return
+		}
+
 		// ============================
+		// INIT SERVICES (Hanya jika DB tersedia)
+		// ============================
+		fmt.Println("\n✅ Database available - initializing services...")
+
+		// PROJECT SERVICES
+		projectRepo := projectRPO.NewRepository(db)
+		var projectService projectServsc.Service
+		if uploadProvider == "supabase" && supabaseUploadService != nil {
+			supabaseWrapper := projectServsc.NewSupabaseUploadWrapper(supabaseUploadService)
+			projectService = projectServsc.NewServiceWithUpload(projectRepo, supabaseWrapper, "projects")
+		} else {
+			localPath := filepath.Join(uploadBasePath, "projects")
+			projectService = projectServsc.NewService(projectRepo, localPath)
+		}
+		projectHandler := handlers.NewProjectHandler(projectService)
+
+		memberRepo := repositoryprojek.NewProjectMemberRepo(gormDB)
+		memberService := projectServsc.NewProjectMemberService(memberRepo, projectRepo)
+
+		tagsrepo := projectRPO.NewTagsRepository(gormDB)
+		tagsService := projectServsc.NewTaskService(tagsrepo)
+		tagsHandler := handlers.NewTagsHandler(tagsService)
+
+		// EXPERIENCE SERVICES
+		expeRepo := repo.NewExpeGormRepository(gormDB)
+		expeService := service.NewExpeService(expeRepo)
+		expeHandler := serviceroute.NewGormExpeHandler(expeService)
+
+		// PORTFOLIO SERVICES
+		skillRepo := portfolioRepo.NewSkillRepository(gormDB)
+		var skillService portfolioService.SkillService
+		if uploadProvider == "supabase" && supabaseUploadService != nil {
+			supabaseWrapper := portfolioService.NewSupabaseUploadWrapper(supabaseUploadService)
+			skillService = portfolioService.NewSkillServiceWithUpload(skillRepo, supabaseWrapper, "skills")
+		} else {
+			localPath := filepath.Join(uploadBasePath, "skills")
+			skillService = portfolioService.NewSkillService(skillRepo, localPath)
+		}
+		skillHandler := handlers.NewSkillHandler(skillService)
+
+		certRepo := portfolioRepo.NewCertificateRepository(gormDB)
+		var certService portfolioService.CertificateService
+		if uploadProvider == "supabase" && supabaseUploadService != nil {
+			supabaseWrapper := portfolioService.NewSupabaseUploadWrapper(supabaseUploadService)
+			certService = portfolioService.NewCertificateServiceWithUpload(certRepo, supabaseWrapper, "certificates")
+		} else {
+			localPath := filepath.Join(uploadBasePath, "certificates")
+			certService = portfolioService.NewCertificateService(certRepo, localPath)
+		}
+		certHandler := handlers.NewCertificateHandler(certService)
+
+		eduRepo := portfolioRepo.NewEducationRepository(gormDB)
+		eduService := portfolioService.NewEducationService(eduRepo)
+		eduHandler := handlers.NewEducationHandler(eduService)
+
+		testRepo := portfolioRepo.NewTestimonialRepository(gormDB)
+		testService := portfolioService.NewTestimonialService(testRepo)
+		testHandler := handlers.NewTestimonialHandler(testService)
+
+		blogRepo := portfolioRepo.NewBlogRepository(gormDB)
+		blogService := portfolioService.NewBlogService(blogRepo)
+		blogHandler := handlers.NewBlogHandler(blogService)
+
+		sectionRepo := portfolioRepo.NewSectionRepository(gormDB)
+		sectionService := portfolioService.NewSectionService(sectionRepo)
+		sectionHandler := handlers.NewSectionHandler(sectionService)
+
+		socialLinkRepo := portfolioRepo.NewSocialLinkRepository(gormDB)
+		socialLinkService := portfolioService.NewSocialLinkService(socialLinkRepo)
+		socialLinkHandler := handlers.NewSocialLinkHandler(socialLinkService)
+
+		settingRepo := portfolioRepo.NewSettingRepository(gormDB)
+		settingService := portfolioService.NewSettingService(settingRepo)
+		settingHandler := handlers.NewSettingHandler(settingService)
+
+		// ============================
+		// REGISTER ALL ROUTES
+		// ============================
+
 		// PROJECT ROUTES
-		// ============================
 		projectRoutes := api.Group("/v1/projects")
 		{
 			projectRoutes.GET("", projectHandler.GetAllProjects)
@@ -241,9 +213,7 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 			tags.GET("", projectHandler.GetAllTags)
 		}
 
-		// ============================
 		// EXPERIENCE ROUTES
-		// ============================
 		expeRoutes := api.Group("/v1")
 		{
 			expeRoutes.POST("/experiences/with-relations", expeHandler.CreateExperiencesWithRelations)
@@ -253,12 +223,9 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 			expeRoutes.DELETE("/experiences/with-relations/:id", expeHandler.DeleteExperiencesWithRelations)
 		}
 
-		// ============================
 		// PORTFOLIO ROUTES
-		// ============================
 		v1 := api.Group("/v1")
 
-		// SKILLS ROUTES
 		skills := v1.Group("/skills")
 		{
 			skills.POST("", skillHandler.Create)
@@ -272,7 +239,6 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 			skills.DELETE("/:id", skillHandler.Delete)
 		}
 
-		// CERTIFICATES ROUTES
 		certificates := v1.Group("/certificates")
 		{
 			certificates.POST("", certHandler.Create)
@@ -283,7 +249,6 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 			certificates.DELETE("/:id", certHandler.Delete)
 		}
 
-		// EDUCATION ROUTES
 		education := v1.Group("/education")
 		{
 			education.POST("", eduHandler.CreateWithAchievements)
@@ -293,7 +258,6 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 			education.DELETE("/:id", eduHandler.DeleteWithAchievements)
 		}
 
-		// TESTIMONIALS ROUTES
 		testimonials := v1.Group("/testimonials")
 		{
 			testimonials.POST("", testHandler.Create)
@@ -305,7 +269,6 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 			testimonials.DELETE("/:id", testHandler.Delete)
 		}
 
-		// BLOG ROUTES
 		blog := v1.Group("/blog")
 		{
 			blog.POST("", blogHandler.CreateWithTags)
@@ -318,7 +281,6 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 			blog.DELETE("/:id", blogHandler.DeleteWithTags)
 		}
 
-		// SECTIONS ROUTES
 		sections := v1.Group("/sections")
 		{
 			sections.POST("", sectionHandler.Create)
@@ -326,7 +288,6 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 			sections.DELETE("/:id", sectionHandler.Delete)
 		}
 
-		// SOCIAL LINKS ROUTES
 		socialLinks := v1.Group("/social-links")
 		{
 			socialLinks.POST("", socialLinkHandler.Create)
@@ -334,7 +295,6 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 			socialLinks.DELETE("/:id", socialLinkHandler.Delete)
 		}
 
-		// SETTINGS ROUTES
 		settings := v1.Group("/settings")
 		{
 			settings.POST("", settingHandler.Create)
@@ -343,9 +303,7 @@ func Initiator(router *gin.Engine, db *sql.DB, gormDB *gorm.DB) {
 		}
 	}
 
-	// ============================
 	// SERVE STATIC FILES (Development only)
-	// ============================
 	if os.Getenv("GIN_MODE") != "release" && uploadProvider == "local" {
 		router.Static("/uploads", uploadBasePath)
 		log.Printf("📁 Serving static files from: %s", uploadBasePath)
@@ -362,23 +320,6 @@ func getUploadPath() string {
 		return "/tmp/uploads"
 	}
 	return "./uploads"
-}
-
-func createUploadDirs(basePath string) {
-	dirs := []string{
-		"projects",
-		"skills",
-		"certificates",
-	}
-
-	for _, dir := range dirs {
-		fullPath := filepath.Join(basePath, dir)
-		if err := os.MkdirAll(fullPath, 0755); err != nil {
-			log.Printf("Warning: Cannot create upload directory %s: %v", fullPath, err)
-		} else {
-			log.Printf("Created upload directory: %s", fullPath)
-		}
-	}
 }
 
 func min(a, b int) int {
