@@ -75,25 +75,6 @@ func initializeApp() error {
 		})
 	})
 
-	router.GET("/api/health", func(c *gin.Context) {
-		dbStatus := "not_configured"
-		if db != nil {
-			if err := db.Ping(); err == nil {
-				dbStatus = "connected"
-			} else {
-				dbStatus = "disconnected"
-			}
-		}
-
-		c.JSON(200, gin.H{
-			"status":          "ok",
-			"service":         "gintugas-api",
-			"database":        dbStatus,
-			"upload_provider": os.Getenv("UPLOAD_PROVIDER"),
-			"environment":     "vercel",
-		})
-	})
-
 	// Initialize all routes
 	routers.Initiator(router, db, gormDB)
 
